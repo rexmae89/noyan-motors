@@ -1202,6 +1202,17 @@ html[dir="rtl"] .c-line[href]:hover .c-go{transform:rotate(180deg) translateX(3p
   background:linear-gradient(to top, rgba(11,10,8,.6), transparent);
 }
 .card-img.no-photo{background:radial-gradient(120% 90% at 50% 30%, #2a241b 0%, #0a0906 72%);}
+.card-mono{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-family:'Italiana',serif; font-size:clamp(30px,7vw,56px); letter-spacing:.18em;
+  color:rgba(201,169,97,.34); text-indent:.18em;
+}
+.gal-empty{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:radial-gradient(120% 90% at 50% 30%, #241f18 0%, #0a0906 72%);
+  color:var(--pearl-faint); font-size:13px; letter-spacing:.04em;
+}
+html[lang="fa"] .gal-empty{font-family:'Vazirmatn',sans-serif; font-size:14px;}
 .card-badge,.card-fav,.card-cmp,.gal-nav{-webkit-backdrop-filter:blur(4px);}
 .drawer{-webkit-backdrop-filter:blur(16px);}
 .modal-overlay{-webkit-backdrop-filter:blur(8px);}
@@ -1446,22 +1457,11 @@ html[lang="fa"] .f-toggle-count{font-family:'Vazirmatn',sans-serif;}
 
   <div class="cat-tabs-wrap reveal-l" id="catTabsWrap">
     <div class="cat-tabs" id="catTabs" role="tablist" aria-label="Vehicle Categories">
-      <button type="button" class="cat-tab active" data-body="" role="tab" aria-selected="true">
+      <button type="button" class="cat-tab active" data-make="" role="tab" aria-selected="true">
         <span class="cat-tab-dot"></span>
         <span data-i18n="tabAllVehicles">All Vehicles</span>
       </button>
-      <button type="button" class="cat-tab" data-body="SUV" role="tab" aria-selected="false">
-        <span class="cat-tab-dot"></span>
-        <span data-i18n="tabSUV">SUV</span>
-      </button>
-      <button type="button" class="cat-tab" data-body="Coupe" role="tab" aria-selected="false">
-        <span class="cat-tab-dot"></span>
-        <span data-i18n="tabCoupe">Coupe</span>
-      </button>
-      <button type="button" class="cat-tab" data-body="Sedan" role="tab" aria-selected="false">
-        <span class="cat-tab-dot"></span>
-        <span data-i18n="tabSedan">Sedan</span>
-      </button>
+      <span id="catMakes" style="display:contents"></span>
       <button type="button" class="cat-tab cat-fav" id="favTab" aria-pressed="false">
         <span class="cat-tab-dot"></span>
         <span data-i18n="tabSaved">Saved</span>
@@ -1776,6 +1776,7 @@ html[lang="fa"] .f-toggle-count{font-family:'Vazirmatn',sans-serif;}
     <div class="modal-media">
       <div class="gal-main">
         <img id="galImg" src="" alt="">
+        <div class="gal-empty" id="galEmpty" hidden><span data-i18n="noPhoto">No photo available</span></div>
         <button class="gal-nav gal-prev" id="galPrev" aria-label="Previous photo">‹</button>
         <button class="gal-nav gal-next" id="galNext" aria-label="Next photo">›</button>
         <span class="gal-count" id="galCount"></span>
@@ -2005,6 +2006,8 @@ const I18N = {
     modalTg: "Enquire on Telegram",
     modalViewing: "Book a Viewing",
     priceReq: "Price on request",
+    noPhoto: "No photo available",
+    feedDown: "Live inventory is not available right now. Please call or message us and we will send you the current list.",
     kmSuffix: "km",
     pricePrefix: "AED",
     compareColSpec: "Specification",
@@ -2165,6 +2168,8 @@ const I18N = {
     modalTg: "استعلام قیمت در تلگرام",
     modalViewing: "رزرو نوبت بازدید حضوری",
     priceReq: "قیمت توافقی / استعلام",
+    noPhoto: "تصویری ثبت نشده",
+    feedDown: "در حال حاضر دریافت موجودی ممکن نیست. لطفاً تماس بگیرید تا لیست به‌روز برایتان ارسال شود.",
     kmSuffix: "کیلومتر",
     pricePrefix: "درهم",
     compareColSpec: "مشخصات",
@@ -2364,7 +2369,11 @@ const FALLBACK_CARS = [
 /* ============================================================
    APPLICATION STATE & CONFIG
 ============================================================ */
-const DATA_URL = "https://api.apify.com/v2/datasets/OfrPPSWNseY6db2np/items?token=apify_api_VNanAmz0x0bW05slaVQazTFCw7kLRO422srP";
+const DATA_URL = "https://api.apify.com/v2/acts/t1e3ChPvHwX9tm08q/runs/last/dataset/items?token=apify_api_VNanAmz0x0bW05slaVQazTFCw7kLRO422srP&clean=1&limit=1000";
+// if the "last run" is empty or still running, fall back to this stored dataset
+const DATA_URL_FALLBACK = "https://api.apify.com/v2/datasets/6FyIU4Md93Fjcd26Q/items?token=apify_api_VNanAmz0x0bW05slaVQazTFCw7kLRO422srP&clean=1&limit=1000";
+const MIN_YEAR = 2016;    // only model year 2016 and newer
+const MIN_PRICE = 150000; // only AED 150,000 and above
 const TG_LINK = "https://t.me/Rexm_aep";
 const WA_PHONE = "989368975409"; // Can be updated by owner
 const PAGE_SIZE = 12;
@@ -2382,6 +2391,7 @@ let favorites = new Set();
 let compareCars = [];
 let gallery = { photos: [], idx: 0 };
 let favOnly = false;          // "Saved" tab: show favorites only
+let feedFailed = false;       // true when the Dubizzle feed could not be read
 const seenCards = new Set();  // cards already revealed once (no replay on filter changes)
 let galToken = 0;             // guards against out-of-order gallery image loads
 let toastTimer = null;
@@ -2482,14 +2492,111 @@ function getPhotos(item) {
   if (Array.isArray(item.photo_mains)) {
     item.photo_mains.forEach(p => { if (p && !arr.includes(p)) arr.push(p); });
   }
-  if (!arr.length) {
-    arr.push("https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80");
-  }
-  return arr;
+  return arr; // no stock photo: a listing without photos gets the designed placeholder
 }
 
 function esc(s) {
   return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+/* ============================================================
+   DUBIZZLE FEED — NORMALIZER
+   Accepts the records produced by the Dubizzle motors actors
+   (price/title/url at minimum, plus year/photos/mileage when the
+   actor is configured for them) and shapes them for this page.
+============================================================ */
+function numOf(v) {
+  if (v === null || v === undefined || v === "") return NaN;
+  if (typeof v === "number") return v;
+  const n = Number(String(v).replace(/[^\d.]/g, ""));
+  return isNaN(n) ? NaN : n;
+}
+
+function slugWords(s) {
+  return String(s || "").replace(/[-_]+/g, " ").replace(/\s+/g, " ")
+    .replace(/\b[a-z]/g, ch => ch.toUpperCase())
+    .replace(/\b[A-Za-z]{2,3}\b/g, w => w.toUpperCase()) // BMW, GLE, M5, X5, AMG …
+    .trim();
+}
+
+function yearFromTitle(t) {
+  const m = String(t || "").match(/\b(19[6-9]\d|20[0-4]\d)\b/);
+  return m ? Number(m[1]) : 0;
+}
+
+function photosOf(raw) {
+  const out = [];
+  const push = v => {
+    if (!v) return;
+    if (Array.isArray(v)) { v.forEach(push); return; }
+    if (typeof v === "object") { push(v.url || v.src || v.image || v.href); return; }
+    const s = String(v);
+    if (/^https?:\/\//.test(s) && !out.includes(s)) out.push(s);
+  };
+  push(raw.photo); push(raw.photo_mains); push(raw.photos);
+  push(raw.images); push(raw.imageUrls); push(raw.image); push(raw.thumbnail);
+  return out;
+}
+
+function cityOf(raw, url) {
+  const given = String(
+    (raw.city && (raw.city.name || raw.city)) ||
+    (raw.location && (raw.location.city || raw.location.name)) || ""
+  );
+  const hay = (given + " " + String(url || "")).toLowerCase();
+  if (hay.includes("abu dhabi") || hay.includes("abudhabi")) return "Abu Dhabi";
+  if (hay.includes("sharjah")) return "Sharjah";
+  if (hay.includes("ajman")) return "Ajman";
+  if (hay.includes("ras al khaimah") || hay.includes("rasalkhaimah")) return "Ras Al Khaimah";
+  if (hay.includes("fujairah")) return "Fujairah";
+  if (hay.includes("al ain") || hay.includes("alain")) return "Al Ain";
+  if (hay.includes("dubai")) return "Dubai";
+  return "UAE";
+}
+
+function normalizeVehicle(raw, i) {
+  const title = String(raw.title || raw.name_en || raw.name || "").trim();
+  const url = String(raw.url || "");
+  const slug = url.match(/\/motors\/[\w-]*cars?\/([^\/]+)\/([^\/?#]+)/i);
+  const make = slugWords(raw.make || raw.brand || (slug ? slug[1] : ""));
+  const model = slugWords(raw.model || (slug ? slug[2] : ""));
+
+  const details = {};
+  const put = (key, val) => {
+    if (val === undefined || val === null || String(val).trim() === "") return;
+    details[key] = { en: { value: String(val).trim() } };
+  };
+  if (/\bgcc\b|gulf/i.test(title)) put("Regional Specs", "GCC Specs");
+  put("Regional Specs", raw.regionalSpecs || raw.regionalSpec);
+  put("Transmission Type", raw.transmission || raw.transmissionType);
+  put("Fuel Type", raw.fuel || raw.fuelType || raw.fuel_type);
+  put("Body Type", raw.bodyType || raw.body_type || raw.body);
+  put("Exterior Color", raw.exteriorColor || raw.exterior_color || raw.color);
+  put("Steering Side", raw.steeringSide || raw.steering_side);
+  put("Horsepower", raw.horsepower || raw.power);
+  put("Trim", raw.trim);
+  put("Warranty", raw.warranty);
+
+  const km = numOf(raw.kilometers ?? raw.odometer ?? raw.mileage ?? raw.km);
+  const year = Number(raw.year) || yearFromTitle(title) || 0;
+  const price = numOf(raw.price) || 0;
+  const photos = photosOf(raw);
+  const city = cityOf(raw, url);
+  const added = Date.parse(raw.addedOn || raw.postedAt || raw.createdAt || "") || 0;
+
+  return {
+    id: raw.id || raw.adId || `${make}-${model}-${year}-${price}-${i}`.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+    name: { en: title || [make, model, year || ""].filter(Boolean).join(" ").trim() || "Dubizzle listing" },
+    year: year,
+    price: price,
+    kilometers: isNaN(km) ? null : km,
+    site: { en: city, fa: city },
+    category: { en: ["Cars", make, model] },
+    photo: photos[0] || "",
+    photo_mains: photos.slice(1),
+    added: added,
+    details: details
+  };
 }
 
 const SPEC_LABELS_FA = {
@@ -2885,6 +2992,7 @@ if (ftCopyEl) ftCopyEl.textContent = `© ${curYear} Noyan Motors. All rights res
    COUNTERS
 ============================================================ */
 function animateCount(el, target, dur = 1800) {
+  if (!isFinite(target)) target = 0;
   if (reduceMotion) { el.textContent = fmtNum(target); return; }
   const start = performance.now();
   (function step(now) {
@@ -2967,6 +3075,11 @@ function setHero(i, manual) {
    TICKER
 ============================================================ */
 function renderTicker() {
+  if (!cars.length) {
+    document.getElementById("ticker").innerHTML =
+      `<span class="tick"><span class="dia">◆</span> ${I18N[currentLang].feedDown}</span>`;
+    return;
+  }
   const total = cars.length;
   const priced = cars.filter(c => c.price);
   const avg = Math.round(priced.reduce((s, c) => s + c.price, 0) / (priced.length || 1));
@@ -3011,6 +3124,8 @@ function populateFilters() {
     bodySel.appendChild(opt);
   });
   if (prevBody) bodySel.value = prevBody;
+
+  populateCatTabs();
 }
 
 function applyFilters(resetPage = true) {
@@ -3054,33 +3169,48 @@ function applyFilters(resetPage = true) {
     return (b.added || 0) - (a.added || 0);
   });
 
-  // Synchronize category quick tabs with selected body
-  syncCatTabs(body);
+  // Synchronize category quick tabs with the selected make
+  syncCatTabs();
 
   if (resetPage) visibleCount = PAGE_SIZE;
   renderGrid();
 }
 
-function syncCatTabs(currentBody) {
-  const tabs = document.querySelectorAll(".cat-tab[data-body]");
-  tabs.forEach(tab => {
-    const b = tab.dataset.body || "";
-    const isActive = (b === (currentBody || ""));
-    tab.classList.toggle("active", isActive);
-    tab.setAttribute("aria-selected", isActive ? "true" : "false");
+function syncCatTabs() {
+  const cur = document.getElementById("makeSelect").value || "";
+  document.querySelectorAll(".cat-tab[data-make]").forEach(tab => {
+    const on = (tab.dataset.make || "") === cur;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
   });
 }
 
-document.querySelectorAll(".cat-tab[data-body]").forEach(tab => {
-  tab.addEventListener("click", () => {
-    const bodyVal = tab.dataset.body || "";
-    const bodySel = document.getElementById("bodySelect");
-    if (bodySel) {
-      bodySel.value = bodyVal;
+/* quick tabs are built from the makes that actually exist in the feed */
+function populateCatTabs() {
+  const box = document.getElementById("catMakes");
+  if (!box) return;
+  const counts = {};
+  cars.forEach(c => { const m = getMake(c); if (m) counts[m] = (counts[m] || 0) + 1; });
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  box.innerHTML = top.map(([m]) =>
+    `<button type="button" class="cat-tab" data-make="${esc(m)}" role="tab" aria-selected="false"><span class="cat-tab-dot"></span><span>${esc(m)}</span></button>`
+  ).join("");
+  box.querySelectorAll(".cat-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.getElementById("makeSelect").value = tab.dataset.make || "";
       applyFilters();
-    }
+    });
   });
-});
+}
+
+/* the static "All vehicles" quick tab */
+const allTabBtn = document.querySelector('.cat-tabs .cat-tab[data-make=""]');
+if (allTabBtn) {
+  allTabBtn.addEventListener("click", () => {
+    document.getElementById("makeSelect").value = "";
+    applyFilters();
+  });
+}
 
 /* Saved tab + mobile filter toggle + toast helpers */
 const favTab = document.getElementById("favTab");
@@ -3328,38 +3458,48 @@ function renderCompareTable() {
 ============================================================ */
 function cardHtml(item, globalIdx) {
   const name = getName(item);
-  const photo = getPhotos(item)[0] || "";
-  const rawTrans = (detailVal(item, "Transmission Type") || "—").replace(" Transmission", "");
+  const photos = getPhotos(item);
+  const photo = photos[0] || "";
+  const rawTrans = (detailVal(item, "Transmission Type") || "").replace(" Transmission", "");
   const trans = (currentLang === "fa" && SPEC_VALS_FA[rawTrans]) ? SPEC_VALS_FA[rawTrans] : rawTrans;
-  const rawFuel = detailVal(item, "Fuel Type") || "—";
+  const rawFuel = detailVal(item, "Fuel Type") || "";
   const fuel = (currentLang === "fa" && SPEC_VALS_FA[rawFuel]) ? SPEC_VALS_FA[rawFuel] : rawFuel;
   const badge = item.year ? fmtYear(item.year) : "";
   const stableId = getCarStableId(item, globalIdx);
   const favOn = favorites.has(stableId);
   const cmpOn = isCompared(item);
 
+  // chips only for the facts this listing actually has
+  const chips = [];
+  if (item.kilometers !== null && item.kilometers !== undefined) chips.push(`<span class="chip">${fmtKm(item.kilometers)}</span>`);
+  if (trans) chips.push(`<span class="chip">${esc(trans)}</span>`);
+  if (fuel) chips.push(`<span class="chip">${esc(fuel)}</span>`);
+  if (!chips.length) {
+    const mm = [getMake(item), getModel(item)].filter(Boolean).join(" ");
+    if (mm) chips.push(`<span class="chip">${esc(mm)}</span>`);
+  }
+  const mono = (getMake(item) || name).replace(/[^A-Za-z\u0600-\u06FF ]/g, "").trim().slice(0, 2).toUpperCase() || "NM";
+
   return `
   <article class="card${cmpOn ? ' selected-for-compare' : ''}" data-stable-id="${esc(stableId)}" tabindex="0" role="button" aria-label="${esc(name)}">
     <div class="glare"></div>
-    <div class="card-img">
+    <div class="card-img${photo ? "" : " no-photo"}">
       ${badge ? `<span class="card-badge">${badge}</span>` : ""}
-      ${getPhotos(item).length > 1 ? `<span class="card-photos">◈ ${fmtNum(getPhotos(item).length)}</span>` : ""}
+      ${photos.length > 1 ? `<span class="card-photos">◈ ${fmtNum(photos.length)}</span>` : ""}
       <button class="card-fav${favOn ? " active" : ""}" data-fav="${esc(stableId)}" aria-label="Save to favorites">
         <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.9-10-9.3C.3 8.6 2.2 5 5.6 5c2 0 3.4 1.1 4.4 2.6C11 6.1 12.4 5 14.4 5c3.4 0 5.3 3.6 3.6 6.7C19.5 16.1 12 21 12 21z"/></svg>
       </button>
       <button class="card-cmp${cmpOn ? " on" : ""}" data-cmp="${esc(stableId)}" aria-label="Compare">
         <span class="box"></span><span>${I18N[currentLang].cmpBtn}</span>
       </button>
-      <img src="${esc(photo)}" alt="${esc(name)}" loading="lazy" onload="this.classList.add('loaded')" onerror="this.parentNode.classList.add('no-photo'); this.remove();">
+      ${photo
+        ? `<img src="${esc(photo)}" alt="${esc(name)}" loading="lazy" onload="this.classList.add('loaded')" onerror="this.parentNode.classList.add('no-photo'); this.remove();">`
+        : `<span class="card-mono" aria-hidden="true">${esc(mono)}</span>`}
     </div>
     <div class="card-body">
       <div class="card-title">${esc(name)}</div>
       <div class="card-loc">${esc(getCity(item))}</div>
-      <div class="card-specs">
-        <span class="chip">${fmtKm(item.kilometers)}</span>
-        <span class="chip">${esc(trans)}</span>
-        <span class="chip">${esc(fuel)}</span>
-      </div>
+      <div class="card-specs">${chips.join("")}</div>
       <div class="card-foot">
         <div class="price">${fmtPrice(item.price)}</div>
         <div class="view-link">${I18N[currentLang].viewLink}</div>
@@ -3408,7 +3548,8 @@ function renderGrid() {
     .replace("{total}", fmtNum(filtered.length));
 
   if (filtered.length === 0) {
-    grid.innerHTML = `<div class="state-msg">${I18N[currentLang].noVehicles}</div>`;
+    const msg = feedFailed ? I18N[currentLang].feedDown : I18N[currentLang].noVehicles;
+    grid.innerHTML = `<div class="state-msg">${msg}</div>`;
     document.getElementById("loadMoreWrap").hidden = true;
     Lux.measure();
     return;
@@ -3543,6 +3684,19 @@ function openModal(item) {
 
 function renderGallery(name) {
   const { photos, idx } = gallery;
+  const emptyEl = document.getElementById("galEmpty");
+  if (emptyEl) emptyEl.hidden = photos.length > 0;
+
+  if (!photos.length) {
+    galImg.removeAttribute("src");
+    galImg.style.opacity = 0;
+    document.getElementById("galCount").textContent = "";
+    document.getElementById("galPrev").style.display = "none";
+    document.getElementById("galNext").style.display = "none";
+    document.getElementById("galThumbs").style.display = "none";
+    return;
+  }
+
   galImg.style.opacity = 0;
   const token = ++galToken;
   const show = () => {
@@ -3733,19 +3887,31 @@ async function loadInventory() {
   showSkeletons();
   setProgress(40);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(DATA_URL, { signal: controller.signal });
-    clearTimeout(timeout);
-    setProgress(75);
-    if (!res.ok) throw new Error("API response not OK");
-    const data = await res.json();
-    const liveCars = Array.isArray(data) ? data.filter(c => c && (c.price || c.name)) : [];
-    if (!liveCars.length) throw new Error("Empty dataset");
-    cars = liveCars;
+    let loaded = [];
+    let lastErr = null;
+    for (const url of [DATA_URL, DATA_URL_FALLBACK]) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (!res.ok) throw new Error("Feed response not OK: " + res.status);
+        const data = await res.json();
+        if (!Array.isArray(data) || !data.length) throw new Error("Empty dataset");
+        // modern, premium inventory only: model year >= MIN_YEAR and price >= MIN_PRICE
+        loaded = data.map(normalizeVehicle)
+          .filter(c => c.price >= MIN_PRICE && c.year >= MIN_YEAR);
+        if (!loaded.length) throw new Error("No vehicles passed the year/price filter");
+        break;
+      } catch(e) { lastErr = e; }
+    }
+    if (!loaded.length) throw (lastErr || new Error("No feed data"));
+    cars = loaded;
+    feedFailed = false;
   } catch(err) {
-    console.warn("Using fallback curated vehicles:", err.message);
-    cars = FALLBACK_CARS;
+    console.warn("Inventory feed unavailable:", err.message);
+    cars = [];
+    feedFailed = true;
   } finally {
     setProgress(95);
     populateFilters();
